@@ -2,8 +2,7 @@ package ecego
 
 import (
 	"crypto/cipher"
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto/ecdh"
 	"encoding/binary"
 	"fmt"
 )
@@ -38,9 +37,9 @@ func (e *Engine) Encrypt(content, target []byte, params OperationalParams) ([]by
 	}
 
 	publicKey := e.publicKey(params)
-	var receiverPublicKey *ecdsa.PublicKey
+	var receiverPublicKey *ecdh.PublicKey
 	if params.StaticKey == nil {
-		receiverPublicKey, err = unmarshalPublicKey(publicKey, params.DH)
+		receiverPublicKey, err = publicKey.Curve().NewPublicKey(params.DH)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +71,7 @@ func (e *Engine) appendHeader(target []byte, params OperationalParams) ([]byte, 
 	keyID := params.KeyID
 	if keyID == nil && params.DH != nil {
 		publicKey := e.publicKey(params)
-		keyID = elliptic.Marshal(publicKey.Curve, publicKey.X, publicKey.Y)
+		keyID = publicKey.Bytes()
 	}
 
 	keyIDLen := len(keyID)
