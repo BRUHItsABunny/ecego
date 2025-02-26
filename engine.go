@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -107,6 +108,17 @@ func (e *Engine) publicKey(params OperationalParams) *ecdh.PublicKey {
 		return privateKey.PublicKey()
 	}
 	return nil
+}
+
+func (e *Engine) PublicKeyAsBase64(params OperationalParams) string {
+	if privateKey := e.privateKey(params); privateKey != nil {
+		return base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
+	}
+	return ""
+}
+
+func (e *Engine) AuthSecretAsBase64() string {
+	return base64.RawURLEncoding.EncodeToString(e.authSecret)
 }
 
 func (e *Engine) buildInfoContext(version Version, senderPublicKey, receiverPublicKey *ecdh.PublicKey) []byte {
@@ -278,4 +290,12 @@ func fillBlockNonce(counter uint64, baseNonce, blockNonce []byte) {
 		blockNonce[4:],
 		counter^binary.BigEndian.Uint64(baseNonce[4:]),
 	)
+}
+
+func PublicKeyFromBase64(curve ecdh.Curve, value string) (*ecdh.PublicKey, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, err
+	}
+	return curve.NewPublicKey(data)
 }
