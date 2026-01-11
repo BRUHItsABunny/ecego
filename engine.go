@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto/ecdh"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -61,7 +61,7 @@ type (
 
 	// KeyLookupFunc is a function that fetches a private key by provided keyID
 	// It must always return non-nil value even if input is nil
-	KeyLookupFunc func(keyID []byte) *ecdsa.PrivateKey
+	KeyLookupFunc func(keyID []byte) *ecdh.PrivateKey
 )
 
 // Engine represents encryption and decryption engine
@@ -96,21 +96,32 @@ type OperationalParams struct {
 	Pad        uint32
 }
 
-func (e *Engine) privateKey(params OperationalParams) *ecdsa.PrivateKey {
+func (e *Engine) privateKey(params OperationalParams) *ecdh.PrivateKey {
 	if params.StaticKey != nil {
 		return nil
 	}
 	return e.keyLookupFunc(params.KeyID)
 }
 
-func (e *Engine) publicKey(params OperationalParams) *ecdsa.PublicKey {
+func (e *Engine) publicKey(params OperationalParams) *ecdh.PublicKey {
 	if privateKey := e.privateKey(params); privateKey != nil {
-		return &privateKey.PublicKey
+		return privateKey.PublicKey()
 	}
 	return nil
 }
 
-func (e *Engine) buildInfoContext(version Version, senderPublicKey, receiverPublicKey *ecdsa.PublicKey) []byte {
+func (e *Engine) PublicKeyAsBase64(params OperationalParams) string {
+	if privateKey := e.privateKey(params); privateKey != nil {
+		return base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
+	}
+	return ""
+}
+
+func (e *Engine) AuthSecretAsBase64() string {
+	return base64.RawURLEncoding.EncodeToString(e.authSecret)
+}
+
+func (e *Engine) buildInfoContext(version Version, senderPublicKey, receiverPublicKey *ecdh.PublicKey) []byte {
 	if senderPublicKey == nil || receiverPublicKey == nil {
 		return nil
 	}
@@ -118,8 +129,8 @@ func (e *Engine) buildInfoContext(version Version, senderPublicKey, receiverPubl
 	var builder bytes.Buffer
 
 	var (
-		receiverPKBytes = elliptic.Marshal(receiverPublicKey.Curve, receiverPublicKey.X, receiverPublicKey.Y)
-		senderPKBytes   = elliptic.Marshal(senderPublicKey.Curve, senderPublicKey.X, senderPublicKey.Y)
+		receiverPKBytes = receiverPublicKey.Bytes()
+		senderPKBytes   = senderPublicKey.Bytes()
 	)
 
 	if version == AES128GCM {
@@ -145,7 +156,7 @@ func (e *Engine) buildInfoContext(version Version, senderPublicKey, receiverPubl
 	return builder.Bytes()
 }
 
-func (e *Engine) deriveSharedSecret(params OperationalParams, publicKey *ecdsa.PublicKey) ([]byte, error) {
+func (e *Engine) deriveSharedSecret(params OperationalParams, publicKey *ecdh.PublicKey) ([]byte, error) {
 	if params.StaticKey != nil {
 		if len(params.StaticKey) != KeySize {
 			return nil, ErrInvalidKeySize
@@ -154,10 +165,11 @@ func (e *Engine) deriveSharedSecret(params OperationalParams, publicKey *ecdsa.P
 		return params.StaticKey, nil
 	}
 	privateKey := e.keyLookupFunc(params.KeyID)
-	x, _ := privateKey.Curve.ScalarMult(publicKey.X, publicKey.Y, privateKey.D.Bytes())
-	// RFC5903 Section 9 states we should only return x.
-	secret := make([]byte, secretSize)
-	x.FillBytes(secret)
+
+	secret, err := privateKey.ECDH(publicKey)
+	if err != nil {
+		return nil, err
+	}
 	return secret, nil
 }
 
@@ -172,7 +184,7 @@ func (e *Engine) buildInfo(base string, infoContext []byte) []byte {
 	return b.Bytes()
 }
 
-func (e *Engine) deriveKey(params OperationalParams, otherPublicKey *ecdsa.PublicKey, infoContext []byte) (key, nonce []byte, err error) {
+func (e *Engine) deriveKey(params OperationalParams, otherPublicKey *ecdh.PublicKey, infoContext []byte) (key, nonce []byte, err error) {
 	var (
 		keyInfo, nonceInfo []byte
 	)
@@ -249,17 +261,12 @@ func (v Version) PaddingSize() int {
 
 func (v Version) String() string { return string(v) }
 
-func unmarshalPublicKey(curve elliptic.Curve, dh []byte) (*ecdsa.PublicKey, error) {
-	x, y := elliptic.Unmarshal(curve, dh)
-	if x == nil {
-		return &ecdsa.PublicKey{}, ErrInvalidDH
-	}
-
-	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+func unmarshalPublicKey(curve ecdh.Curve, dh []byte) (*ecdh.PublicKey, error) {
+	return curve.NewPublicKey(dh)
 }
 
-func SingleKey(key *ecdsa.PrivateKey) KeyLookupFunc {
-	return func([]byte) *ecdsa.PrivateKey { return key }
+func SingleKey(key *ecdh.PrivateKey) KeyLookupFunc {
+	return func([]byte) *ecdh.PrivateKey { return key }
 }
 
 func NewGCM(key []byte) (cipher.AEAD, error) {
@@ -283,4 +290,12 @@ func fillBlockNonce(counter uint64, baseNonce, blockNonce []byte) {
 		blockNonce[4:],
 		counter^binary.BigEndian.Uint64(baseNonce[4:]),
 	)
+}
+
+func PublicKeyFromBase64(curve ecdh.Curve, value string) (*ecdh.PublicKey, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, err
+	}
+	return curve.NewPublicKey(data)
 }

@@ -2,12 +2,14 @@ package ecego_test
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"io"
 	mathRand "math/rand"
 	"testing"
@@ -18,7 +20,7 @@ import (
 
 func TestExamples(t *testing.T) {
 	// Based on examples from RFC8188
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	privateKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Errorf("Private key generate failed: %v", err)
 		return
@@ -319,22 +321,22 @@ func TestDetectTruncation(t *testing.T) {
 
 func TestDH(t *testing.T) {
 	// the static key is used by receiver
-	staticKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	staticKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Errorf("Receiver private key generate failed: %v", err)
 		return
 	}
 
-	t.Logf("Receiver private key: X: %s, Y: %s, D: %s", staticKey.X, staticKey.Y, staticKey.D)
+	// t.Logf("Receiver private key: X: %s, Y: %s, D: %s", staticKey.X, staticKey.Y, staticKey.D)
 
 	// the ephemeral key is used by the sender
-	ephemeralKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ephemeralKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Errorf("Receiver private key generate failed: %v", err)
 		return
 	}
 
-	t.Logf("Sender private key: X: %s, Y: %s, D: %s", ephemeralKey.X, ephemeralKey.Y, ephemeralKey.D)
+	// t.Logf("Sender private key: X: %s, Y: %s, D: %s", ephemeralKey.X, ephemeralKey.Y, ephemeralKey.D)
 
 	input := generateInput(t)
 	authSecret := generateKey(t)
@@ -349,12 +351,12 @@ func TestDH(t *testing.T) {
 			ecego.OperationalParams{
 				Version: version,
 				Salt:    salt,
-				DH:      elliptic.Marshal(ephemeralKey.Curve, ephemeralKey.X, ephemeralKey.Y),
+				DH:      ephemeralKey.PublicKey().Bytes(),
 			},
 			ecego.OperationalParams{
 				Version: version,
 				Salt:    salt,
-				DH:      elliptic.Marshal(staticKey.Curve, staticKey.X, staticKey.Y),
+				DH:      staticKey.PublicKey().Bytes(),
 			},
 			input,
 		)
@@ -366,7 +368,7 @@ func TestDH(t *testing.T) {
 }
 
 func TestErrorsDecrypt(t *testing.T) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	privateKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Errorf("Private key generate failed: %v", err)
 		return
@@ -376,10 +378,11 @@ func TestErrorsDecrypt(t *testing.T) {
 		t.Helper()
 
 		_, err := ecego.NewEngine(ecego.SingleKey(privateKey)).Decrypt(input, nil, params)
-		if !errors.Is(err, errExpected) {
-			t.Errorf("Error %v is not an %v", err, errExpected)
-			return
+		errUnwrapper := errors.Unwrap(err)
+		if errUnwrapper != nil {
+			err = errUnwrapper
 		}
+		assert.Equal(t, errExpected.Error(), err.Error(), "Error is not matching")
 	}
 
 	f(
@@ -410,7 +413,7 @@ func TestErrorsDecrypt(t *testing.T) {
 		ecego.OperationalParams{
 			Version:   ecego.AESGCM,
 			StaticKey: generateKey(t),
-			DH:        elliptic.Marshal(privateKey.Curve, privateKey.X, privateKey.Y),
+			DH:        privateKey.PublicKey().Bytes(),
 			Salt:      []byte{1, 2, 3, 4, 5, 6},
 		},
 		ecego.ErrInvalidSaltSize,
@@ -436,7 +439,7 @@ func TestErrorsDecrypt(t *testing.T) {
 		ecego.OperationalParams{
 			StaticKey:  []byte{0xca, 0xa7, 0x65, 0x67, 0xeb, 0x58, 0x7a, 0x67, 0xe8, 0x81, 0x29, 0xaf, 0xed, 0x6b, 0x39, 0x3d},
 			Salt:       []byte{0x23, 0x50, 0x6c, 0xc6, 0xd1, 0x6d, 0xb6, 0x5b, 0xf7, 0xbb, 0xf3, 0xa8, 0xf7, 0x8c, 0x67, 0x9b},
-			DH:         elliptic.Marshal(privateKey.Curve, privateKey.X, privateKey.Y),
+			DH:         privateKey.PublicKey().Bytes(),
 			RecordSize: 4096,
 		},
 		ecego.ErrInvalidPadding,
@@ -444,7 +447,7 @@ func TestErrorsDecrypt(t *testing.T) {
 }
 
 func TestErrorMAC(t *testing.T) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	privateKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Errorf("Private key generate failed: %v", err)
 		return
@@ -460,7 +463,7 @@ func TestErrorMAC(t *testing.T) {
 		ecego.OperationalParams{
 			StaticKey:  []byte{0xca, 0xa7, 0x65, 0x67, 0xeb, 0x58, 0x7a, 0x67, 0xe8, 0x81, 0x29, 0xaf, 0xed, 0x6b, 0x39, 0x3d},
 			Salt:       []byte{0x23, 0x50, 0x6c, 0xc6, 0xd1, 0x6d, 0xb6, 0x5b, 0xf7, 0xbb, 0xf3, 0xa8, 0xf6, 0x8c, 0x67, 0x9b},
-			DH:         elliptic.Marshal(privateKey.Curve, privateKey.X, privateKey.Y),
+			DH:         privateKey.PublicKey().Bytes(),
 			RecordSize: 4096,
 		},
 	)
@@ -471,7 +474,7 @@ func TestErrorMAC(t *testing.T) {
 }
 
 func TestErrorsEncrypt(t *testing.T) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	privateKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Errorf("Private key generate failed: %v", err)
 		return
@@ -481,10 +484,11 @@ func TestErrorsEncrypt(t *testing.T) {
 		t.Helper()
 
 		_, err := ecego.NewEngine(ecego.SingleKey(privateKey)).Encrypt(input, nil, params)
-		if !errors.Is(err, errExpected) {
-			t.Errorf("Error %v is not an %v", err, errExpected)
-			return
+		errUnwrapper := errors.Unwrap(err)
+		if errUnwrapper != nil {
+			err = errUnwrapper
 		}
+		assert.Equal(t, errExpected.Error(), err.Error(), "Error is not matching")
 	}
 
 	f(
@@ -531,9 +535,9 @@ func TestErrorsEncrypt(t *testing.T) {
 	)
 }
 
-//Tests decrpytion given just auth, private key, and message body. All other params are defaults or inferred from the message body.
+// Tests decrpytion given just auth, private key, and message body. All other params are defaults or inferred from the message body.
 func TestSimpleDecrypt(t *testing.T) {
-	f := func(privKeyEnc *ecdsa.PrivateKey, cipherText []byte, authSecret []byte, plainText []byte) {
+	f := func(privKeyEnc *ecdh.PrivateKey, cipherText []byte, authSecret []byte, plainText []byte) {
 		pt, err := ecego.NewEngine(ecego.SingleKey(privKeyEnc), ecego.WithAuthSecret(authSecret)).Decrypt(cipherText, nil, ecego.OperationalParams{})
 		if err != nil {
 			t.Errorf("Error %v occured on decryption\n", err)
@@ -548,20 +552,79 @@ func TestSimpleDecrypt(t *testing.T) {
 	content := []byte("Hi this is my message")
 
 	//one test with predetermined keys and secrets
-	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), bytes.NewBuffer(bytes.Repeat([]byte("abcd"), 10)))
-	authSecret := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	cipherText := []byte{0x1d, 0x83, 0xb2, 0x80, 0x35, 0xf, 0xc, 0x5f, 0x61, 0xa, 0x97, 0xda, 0x90, 0x6f, 0x1b, 0xbe, 0x0, 0x0, 0x10, 0x0, 0x41, 0x4, 0xdf, 0xd5, 0x9, 0x6b, 0x24, 0xe4, 0x98, 0x4c, 0x7f, 0x7a, 0x98, 0x38, 0x69, 0xef, 0xcb, 0x74, 0x29, 0x26, 0x4c, 0x4e, 0xa9, 0x23, 0xb7, 0x8d, 0xa6, 0x5, 0x2f, 0xe1, 0x5, 0x55, 0x79, 0x84, 0x4a, 0xa3, 0x81, 0x45, 0xd9, 0xf1, 0xac, 0xb4, 0x9c, 0x74, 0x77, 0x1b, 0x3, 0x1f, 0xc7, 0x3e, 0x11, 0x85, 0x14, 0xd5, 0xf0, 0x55, 0xa8, 0xe5, 0xa2, 0x85, 0xc6, 0x75, 0xe0, 0x56, 0xfd, 0xb8, 0x89, 0x4c, 0xb7, 0x25, 0x94, 0x6a, 0xfe, 0x47, 0xb, 0x66, 0x58, 0x3a, 0x96, 0x82, 0x89, 0x2, 0x51, 0x62, 0x6e, 0xf, 0xd, 0xd4, 0xa9, 0xb4, 0xe9, 0x46, 0x48, 0xb4, 0x6, 0x8a, 0xcd, 0x84, 0xee, 0x94, 0xc7, 0xfc, 0x7e, 0xd7}
-
-	f(privKey, cipherText, authSecret, content)
+	// privKey, _ := ecdh.P256().NewPrivateKey([]byte{0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64})
+	// authSecret := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	// cipherText := []byte{0x1d, 0x83, 0xb2, 0x80, 0x35, 0xf, 0xc, 0x5f, 0x61, 0xa, 0x97, 0xda, 0x90, 0x6f, 0x1b, 0xbe, 0x0, 0x0, 0x10, 0x0, 0x41, 0x4, 0xdf, 0xd5, 0x9, 0x6b, 0x24, 0xe4, 0x98, 0x4c, 0x7f, 0x7a, 0x98, 0x38, 0x69, 0xef, 0xcb, 0x74, 0x29, 0x26, 0x4c, 0x4e, 0xa9, 0x23, 0xb7, 0x8d, 0xa6, 0x5, 0x2f, 0xe1, 0x5, 0x55, 0x79, 0x84, 0x4a, 0xa3, 0x81, 0x45, 0xd9, 0xf1, 0xac, 0xb4, 0x9c, 0x74, 0x77, 0x1b, 0x3, 0x1f, 0xc7, 0x3e, 0x11, 0x85, 0x14, 0xd5, 0xf0, 0x55, 0xa8, 0xe5, 0xa2, 0x85, 0xc6, 0x75, 0xe0, 0x56, 0xfd, 0xb8, 0x89, 0x4c, 0xb7, 0x25, 0x94, 0x6a, 0xfe, 0x47, 0xb, 0x66, 0x58, 0x3a, 0x96, 0x82, 0x89, 0x2, 0x51, 0x62, 0x6e, 0xf, 0xd, 0xd4, 0xa9, 0xb4, 0xe9, 0x46, 0x48, 0xb4, 0x6, 0x8a, 0xcd, 0x84, 0xee, 0x94, 0xc7, 0xfc, 0x7e, 0xd7}
+	// f(privKey, cipherText, authSecret, content)
 
 	//one test with encryption first
-	privKey, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	authSecret = generateKey(t)
+	privKey, _ := ecdh.P256().GenerateKey(rand.Reader)
+	authSecret := generateKey(t)
 
-	cipherText, err := ecego.NewEngine(ecego.SingleKey(privKey), ecego.WithAuthSecret(authSecret)).Encrypt(content, nil, ecego.OperationalParams{Salt: generateKey(t), DH: elliptic.Marshal(privKey.Curve, privKey.X, privKey.Y)})
+	cipherText, err := ecego.NewEngine(ecego.SingleKey(privKey), ecego.WithAuthSecret(authSecret)).Encrypt(content, nil, ecego.OperationalParams{Salt: generateKey(t), DH: privKey.PublicKey().Bytes()})
 	if err != nil {
 		t.Fatal("Unable to encrypt data prior to decrypting", err)
 	}
 	f(privKey, cipherText, authSecret, content)
 
+}
+
+func TestECDH(t *testing.T) {
+	privateKey1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privateKey2, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey2 := privateKey2.PublicKey
+
+	x, _ := privateKey1.Curve.ScalarMult(publicKey2.X, publicKey2.Y, privateKey1.D.Bytes())
+	// RFC5903 Section 9 states we should only return x.
+	secret := make([]byte, 32)
+	x.FillBytes(secret)
+
+	ecPrivateKey1, err := privateKey1.ECDH()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ecPrivateKey2, err := privateKey2.ECDH()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecPublicKey2 := ecPrivateKey2.PublicKey()
+	secret2, err := ecPrivateKey1.ECDH(ecPublicKey2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, secret, secret2, "ECDSA and ECDH secrets don't match")
+}
+
+func TestECDHPrivateKey(t *testing.T) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), bytes.NewBuffer(bytes.Repeat([]byte("abcd"), 10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecPrivateKey, err := privateKey.ECDH()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Printf("%#v\n", ecPrivateKey.Bytes())
+	ecPrivateKey2, err := ecdh.P256().GenerateKey(bytes.NewBuffer(bytes.Repeat([]byte("abcd"), 10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("%#v\n", ecPrivateKey2.Bytes())
+
+	ecPrivateKey3, err := ecdh.P256().NewPrivateKey([]byte{0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("%#v\n", ecPrivateKey3.Bytes())
+	assert.Equal(t, ecPrivateKey.Bytes(), ecPrivateKey3.Bytes(), "Private keys don't match")
 }

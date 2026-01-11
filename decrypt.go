@@ -3,13 +3,13 @@ package ecego
 import (
 	"bytes"
 	"crypto/cipher"
-	"crypto/ecdsa"
+	"crypto/ecdh"
 	"encoding/binary"
 	"fmt"
 )
 
 var (
-	ErrInvalidDH      = fmt.Errorf("dh sequence is invalid")
+	ErrInvalidDH      = fmt.Errorf("crypto/ecdh: invalid public key")
 	ErrTruncated      = fmt.Errorf("content truncated")
 	ErrInvalidPadding = fmt.Errorf("invalid padding")
 )
@@ -38,16 +38,16 @@ func (e *Engine) Decrypt(content, target []byte, params OperationalParams) ([]by
 			params.DH = params.KeyID
 		}
 	}
-	
+
 	if len(params.Salt) != saltSize {
 		return nil, ErrInvalidSaltSize
 	}
 
 	publicKey := e.publicKey(params)
-	var senderPublicKey *ecdsa.PublicKey
+	var senderPublicKey *ecdh.PublicKey
 	if params.StaticKey == nil {
 		var err error
-		senderPublicKey, err = unmarshalPublicKey(publicKey, params.DH)
+		senderPublicKey, err = publicKey.Curve().NewPublicKey(params.DH)
 		if err != nil {
 			return nil, err
 		}
