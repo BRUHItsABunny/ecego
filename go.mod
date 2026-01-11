@@ -1,4 +1,4 @@
-module github.com/xakep666/ecego
+module github.com/BRUHItsABunny/ecego
 
 go 1.20
 
